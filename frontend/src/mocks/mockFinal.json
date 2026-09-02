@@ -1,0 +1,26 @@
+{
+  "type": "final",
+  "text": "Built-up area increased by 12% between the two dates, mainly in the northeast quadrant.",
+  "confidence": 0.87,
+  "geojson": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": { "label": "New built-up area", "confidence": 0.87 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [77.55, 12.95],
+              [77.58, 12.95],
+              [77.58, 12.98],
+              [77.55, 12.98],
+              [77.55, 12.95]
+            ]
+          ]
+        }
+      }
+    ]
+  }
+}
