@@ -11,6 +11,7 @@ const EXAMPLE_QUERIES = [
 ];
 
 export default function ChatBox({ onResult, demoMode }) {
+  const [previewUrls, setPreviewUrls] = useState([]);
   const [files, setFiles] = useState([]);
   const [query, setQuery] = useState("");
   const [log, setLog] = useState([]); // { type, message }
@@ -65,7 +66,7 @@ export default function ChatBox({ onResult, demoMode }) {
           if (data.type === "final") {
             setLastTask(data.execution_summary?.task);
             appendLog({ type: "sys", message: "Execution complete." });
-            onResult(data);
+            onResult({ ...data, previewUrls });
           }
         },
         onerror(err) {
@@ -143,7 +144,12 @@ export default function ChatBox({ onResult, demoMode }) {
             type="file"
             multiple
             accept=".tif,.tiff,.png,.jpg,.jpeg"
-            onChange={(e) => setFiles(Array.from(e.target.files))}
+            onChange={(e) => {
+              const selected = Array.from(e.target.files);
+              setFiles(selected);
+              previewUrls.forEach((url) => URL.revokeObjectURL(url)); // avoid memory leaks on re-select
+              setPreviewUrls(selected.map((f) => URL.createObjectURL(f)));
+            }}
             className="text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-300 hover:file:bg-slate-700 file:cursor-pointer file:transition-colors"
           />
         </label>
