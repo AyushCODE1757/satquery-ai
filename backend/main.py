@@ -1,24 +1,37 @@
 import os
+import sys
 import uuid
 import json
 import asyncio
 import logging
+from pathlib import Path
 from typing import List, Optional
+
+# Ensure backend directory is in sys.path regardless of execution entry point
+backend_dir = str(Path(__file__).resolve().parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from geo_utils import extract_bounds_and_crs
 from router import classify_task, get_tool_for_task
 from fallback_payloads import FALLBACK_PAYLOADS
 from tools import TOOL_REGISTRY
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("satquery.main")
 
 app = FastAPI(
     title="SatQuery AI - Interactive Remote Sensing Assistant API",
+    description="Backend AI OS & Agent Router API for Satellite Imagery VQA, Visual Grounding, Change Analysis, and Optical-SAR Fusion.",
     version="1.0.0"
 )
 
@@ -43,7 +56,26 @@ class QueryRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "SatQuery AI Backend Engine"}
+    return {
+        "status": "online",
+        "service": "SatQuery AI Backend Engine",
+        "active_images": len(IMAGE_STORE)
+    }
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "healthy"}
+
+@app.get("/api/images/{image_id}")
+def get_image_info(image_id: str):
+    if image_id not in IMAGE_STORE:
+        raise HTTPException(status_code=404, detail="Image ID not found")
+    meta = IMAGE_STORE[image_id]
+    return {
+        "image_id": image_id,
+        "filename": meta["filename"],
+        "geo_meta": meta["geo_meta"]
+    }
 
 @app.post("/api/upload")
 async def upload_images(images: List[UploadFile] = File(...)):
@@ -122,7 +154,7 @@ async def query_agent(payload: QueryRequest):
 
                 tool_func = TOOL_REGISTRY.get(tool_name)
                 if tool_func:
-                    result_payload = tool_func(query, image_ids)
+                    result_payload = tool_func(query, image_ids, IMAGE_STORE)
                     yield f"data: {json.dumps(result_payload)}\n\n"
                 else:
                     fallback_payload = FALLBACK_PAYLOADS.get(task_type, FALLBACK_PAYLOADS["single_image_vqa"])
