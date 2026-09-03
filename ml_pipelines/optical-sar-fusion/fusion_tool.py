@@ -1,21 +1,13 @@
-"""
-ML-3 Action 1 (MVP Logic): fusion_tool
-
-Reads an Optical .tif and a SAR .tif, maps:
-    SAR VV band     -> Red
-    Optical Band 3  -> Green
-    Optical Band 2  -> Blue
-and writes a false-color composite .png to a temp file for the VLM to read.
-
-Drop this function into backend/tools.py so FS-2's router.py can call it
-as one of the 4 forced tool choices (vqa_tool, grounding_tool, change_tool, fusion_tool).
-"""
+# BEN-14K Narendra Aironi repackaging:
+# empirical/statistical inspection indicates Band 1 = VH, Band 2 = VV.
+# Therefore Band 2 is used as VV.
 
 import os
 import tempfile
 import numpy as np
 import rasterio
 from PIL import Image
+from resampler import read_and_resample_band
 
 
 def fusion_tool(optical_path: str, sar_path: str) -> dict:
@@ -32,22 +24,42 @@ def fusion_tool(optical_path: str, sar_path: str) -> dict:
             "shape": (H, W) of the output
     """
     # --- Read SAR (VV band -> Red) ---
+    # BEN-14K: Band 1 = VH, Band 2 = VV
     with rasterio.open(sar_path) as sar_src:
-        # Assumes band 1 is VV. If the file has VV/VH stacked, adjust index here.
-        sar_vv = sar_src.read(1).astype(np.float32)
+        sar_vv = sar_src.read(2).astype(np.float32)
 
     # --- Read Optical (Band 3 -> Green, Band 2 -> Blue) ---
     with rasterio.open(optical_path) as opt_src:
         band3_green = opt_src.read(3).astype(np.float32)
         band2_blue = opt_src.read(2).astype(np.float32)
 
-    # --- Sanity check: shapes must match before stacking ---
+    # --- Use optical Band 3 as the target shape ---
+    target_shape = band3_green.shape
+
+    # --- Resample SAR if its shape doesn't match ---
+    if sar_vv.shape != target_shape:
+        sar_vv = read_and_resample_band(
+            sar_path,
+            band_index=2,
+            target_shape=target_shape
+        )
+
+    # --- Resample optical Band 2 if its shape doesn't match ---
+    if band2_blue.shape != target_shape:
+        band2_blue = read_and_resample_band(
+            optical_path,
+            band_index=2,
+            target_shape=target_shape
+    )
+
+    # --- Final sanity check ---
     if not (sar_vv.shape == band3_green.shape == band2_blue.shape):
         raise ValueError(
-            f"Shape mismatch — SAR {sar_vv.shape}, "
-            f"Optical B3 {band3_green.shape}, Optical B2 {band2_blue.shape}. "
-            f"Resample to a common grid before fusing."
-        )
+            f"Shape mismatch after resampling — "
+        f"SAR {sar_vv.shape}, "
+        f"Optical B3 {band3_green.shape}, "
+        f"Optical B2 {band2_blue.shape}."
+    )
 
     # --- Normalize each band independently to 0-255 uint8 ---
     def normalize_to_uint8(arr: np.ndarray) -> np.ndarray:
