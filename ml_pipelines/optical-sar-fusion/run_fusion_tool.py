@@ -1,5 +1,23 @@
 """
-run_fusion_tool.py — ML-3 final wrapper matching FS-2's TOOL_REGISTRY schema.
+run_fusion_tool.py — ML-3 final wrapper.
+
+Matches the expected FS-2 TOOL_REGISTRY schema.
+
+Pipeline:
+
+    optical TIFF
+          +
+    SAR TIFF
+          ↓
+    fusion_tool()
+          ↓
+    composite PNG
+          ↓
+    optional VQA/PaliGemma
+          ↓
+    text + confidence
+          ↓
+    GeoJSON + execution_summary
 """
 
 import rasterio
@@ -8,25 +26,52 @@ from rasterio.warp import transform_bounds
 from fusion_tool import (
     fusion_tool,
     normalize_ben_sar_to_uint8,
-    normalize_raw_sar_to_uint8,
 )
 
 
-def get_wgs84_bounds(tif_path: str) -> list:
+def get_wgs84_bounds(
+    tif_path: str,
+) -> list:
     """
-    Extract real WGS84 (EPSG:4326) bounding box from a GeoTIFF's CRS.
-    Use the optical file's CRS — SAR files here may have CRS: None.
+    Extract the real WGS84 bounding box from a GeoTIFF.
+
+    The optical raster is expected to provide the CRS.
+    Native Sentinel-1 demo products may have CRS=None.
+
+    Returns:
+        [min_lon, min_lat, max_lon, max_lat]
     """
+
     with rasterio.open(tif_path) as src:
+
         if src.crs is None:
-            raise ValueError(f"{tif_path} has no CRS — cannot compute bounds.")
+            raise ValueError(
+                f"{tif_path} has no CRS — "
+                "cannot compute WGS84 bounds."
+            )
+
         bounds = src.bounds
-        wgs84_bounds = transform_bounds(src.crs, "EPSG:4326", *bounds)
-    return list(wgs84_bounds)  # [min_lon, min_lat, max_lon, max_lat]
+
+        wgs84_bounds = transform_bounds(
+            src.crs,
+            "EPSG:4326",
+            *bounds,
+        )
+
+    return list(wgs84_bounds)
 
 
-def bounds_to_geojson(bounds: list, label: str, confidence: float) -> dict:
+def bounds_to_geojson(
+    bounds: list,
+    label: str,
+    confidence: float,
+) -> dict:
+    """
+    Convert WGS84 bounding box into a GeoJSON FeatureCollection.
+    """
+
     min_lon, min_lat, max_lon, max_lat = bounds
+
     return {
         "type": "FeatureCollection",
         "features": [
@@ -34,13 +79,30 @@ def bounds_to_geojson(bounds: list, label: str, confidence: float) -> dict:
                 "type": "Feature",
                 "geometry": {
                     "type": "Polygon",
-                    "coordinates": [[
-                        [min_lon, min_lat],
-                        [max_lon, min_lat],
-                        [max_lon, max_lat],
-                        [min_lon, max_lat],
-                        [min_lon, min_lat],
-                    ]],
+                    "coordinates": [
+                        [
+                            [
+                                min_lon,
+                                min_lat,
+                            ],
+                            [
+                                max_lon,
+                                min_lat,
+                            ],
+                            [
+                                max_lon,
+                                max_lat,
+                            ],
+                            [
+                                min_lon,
+                                max_lat,
+                            ],
+                            [
+                                min_lon,
+                                min_lat,
+                            ],
+                        ]
+                    ],
                 },
                 "properties": {
                     "label": label,
@@ -60,32 +122,60 @@ def run_fusion_tool(
     optical_blue_band: int = 2,
     normalize_fn=normalize_ben_sar_to_uint8,
     vqa_fn=None,
-    static_confidence: float = 0.80,
 ) -> dict:
     """
-    Full optical-SAR fusion tool matching FS-2's TOOL_REGISTRY schema.
+    Run the complete optical-SAR fusion pipeline.
 
     Args:
-        query: the user's natural-language query.
-        optical_path, sar_path: paths to the input GeoTIFFs.
-        sar_vv_band, optical_green_band, optical_blue_band, normalize_fn:
-            passed straight through to fusion_tool() — see that file's
-            docstring for BEN vs Bhoonidhi values.
-        vqa_fn: optional callable(image_path: str, query: str) -> str.
-            This should be ML-1's PaliGemma inference function once ready.
-            If None, returns a clearly-labeled placeholder instead of
-            fabricating a specific-sounding description.
-        static_confidence: documented fallback confidence (e.g. model's
-            validation-set accuracy) used when no real per-query
-            confidence signal (like generation sequence scores) is wired
-            in yet. Replace with a real signal when available — don't
-            invent a different specific number per query.
+        query:
+            User's natural-language query.
+
+        optical_path:
+            Optical TIFF path.
+
+        sar_path:
+            SAR TIFF path.
+
+        sar_vv_band:
+            SAR VV band index.
+
+            BigEarthNet:
+                2
+
+            Native Bhoonidhi:
+                1
+
+        optical_green_band:
+            Green band index.
+
+        optical_blue_band:
+            Blue band index.
+
+        normalize_fn:
+            SAR normalization function.
+
+        vqa_fn:
+            Optional VQA inference callable:
+
+                vqa_fn(image_path, query)
+
+            Expected preferred return format:
+
+                {
+                    "text": "...",
+                    "confidence": 0.87
+                }
+
+            Legacy string return values are also accepted.
 
     Returns:
-        dict matching TOOL_REGISTRY schema: text, geojson, confidence,
-        execution_summary.
+        Dictionary matching the TOOL_REGISTRY schema.
     """
-    # --- Real fusion composite ---
+
+    # ---------------------------------------------------------
+    # 1. Generate optical-SAR composite
+    # ---------------------------------------------------------
+
     fusion_result = fusion_tool(
         optical_path,
         sar_path,
@@ -94,36 +184,105 @@ def run_fusion_tool(
         optical_blue_band=optical_blue_band,
         normalize_fn=normalize_fn,
     )
-    composite_path = fusion_result["image_path"]
 
-    # --- Real bounds from optical file's CRS ---
-    bounds = get_wgs84_bounds(optical_path)
+    composite_path = fusion_result[
+        "image_path"
+    ]
 
-    # --- Text: real VQA output if wired in, else honest placeholder ---
+    # ---------------------------------------------------------
+    # 2. Extract geographic bounds
+    # ---------------------------------------------------------
+
+    bounds = get_wgs84_bounds(
+        optical_path
+    )
+
+    # ---------------------------------------------------------
+    # 3. Optional VQA inference
+    # ---------------------------------------------------------
+
     if vqa_fn is not None:
-        text = vqa_fn(composite_path, query)
-        confidence = static_confidence  # swap for real generation score once available
-    else:
-        text = (
-            "[PENDING] Optical-SAR fusion composite generated successfully, "
-            "but VQA text description is not yet wired in — awaiting "
-            "ML-1's inference function."
+
+        inference_result = vqa_fn(
+            composite_path,
+            query,
         )
-        confidence = 0.0  # explicitly zero — do not fabricate a number for un-run inference
+
+        if isinstance(
+            inference_result,
+            dict,
+        ):
+
+            text = str(
+                inference_result.get(
+                    "text",
+                    "",
+                )
+            )
+
+            confidence = float(
+                inference_result.get(
+                    "confidence",
+                    0.0,
+                )
+            )
+
+        else:
+
+            # Backward-compatible support
+            # for string-returning VQA functions.
+            text = str(
+                inference_result
+            )
+
+            confidence = 0.0
+
+    else:
+
+        text = (
+            "[PENDING] Optical-SAR fusion "
+            "composite generated successfully, "
+            "but VQA inference is not wired in."
+        )
+
+        confidence = 0.0
+
+    # ---------------------------------------------------------
+    # 4. GeoJSON
+    # ---------------------------------------------------------
 
     geojson = bounds_to_geojson(
         bounds,
-        label=f"Optical-SAR Fusion Composite: {query}",
+        label=(
+            "Optical-SAR Fusion Composite: "
+            f"{query}"
+        ),
         confidence=confidence,
     )
 
+    # ---------------------------------------------------------
+    # 5. Final TOOL_REGISTRY schema
+    # ---------------------------------------------------------
+
     return {
         "text": text,
+
         "geojson": geojson,
+
         "confidence": confidence,
+
         "execution_summary": {
             "task": "optical_sar_fusion",
-            "models_used": ["fusion_tool"] + (["vqa_tool"] if vqa_fn else []),
+
+            "models_used": (
+                ["fusion_tool"]
+                + (
+                    ["vqa_tool"]
+                    if vqa_fn is not None
+                    else []
+                )
+            ),
+
             "params": {
                 "query": query,
                 "num_images": 2,
@@ -131,17 +290,3 @@ def run_fusion_tool(
             },
         },
     }
-
-
-if __name__ == "__main__":
-    # Bhoonidhi real demo test
-    result = run_fusion_tool(
-        query="Use the optical and SAR images together to identify built-up and water-covered regions.",
-        optical_path="optical_crop.tif",
-        sar_path="sar_vv_crop.tif",
-        sar_vv_band=1,
-        optical_green_band=1,
-        optical_blue_band=2,
-        normalize_fn=normalize_raw_sar_to_uint8,
-    )
-    print(result)

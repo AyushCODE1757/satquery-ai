@@ -1,3 +1,9 @@
 rasterio
 numpy
 datasets
+transformers
+peft
+accelerate
+huggingface_hub
+sentencepiece
+Pillow
