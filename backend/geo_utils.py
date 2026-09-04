@@ -8,7 +8,7 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
     """
     Extracts CRS and bounding box from satellite imagery using rasterio.
     Reprojects bounds to EPSG:4326 (WGS84) for Leaflet rendering.
-    Returns metadata dict containing CRS info and GeoJSON bounds polygon.
+    Returns metadata dict containing CRS info, band count, and GeoJSON bounds polygon.
     """
     try:
         import rasterio
@@ -21,8 +21,8 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
         with rasterio.open(file_path) as dataset:
             crs_str = dataset.crs.to_string() if dataset.crs else "EPSG:4326"
             bounds = dataset.bounds  # (left, bottom, right, top)
-            
-            # If dataset has no valid spatial bounds or default unit bounds, transform or set fallback
+            band_count = dataset.count
+
             if dataset.crs and crs_str != "EPSG:4326":
                 try:
                     min_lon, min_lat, max_lon, max_lat = transform_bounds(
@@ -32,7 +32,6 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
                     logger.warning(f"Transform bounds failed for CRS {crs_str}: {transform_err}. Falling back to default WGS84 coordinates.")
                     min_lon, min_lat, max_lon, max_lat = 72.50, 23.01, 72.55, 23.05
             else:
-                # If bounds are standard unit box [0,0,1,1] or missing
                 if bounds.left == 0.0 and bounds.right == 1.0:
                     min_lon, min_lat, max_lon, max_lat = 72.50, 23.01, 72.55, 23.05
                 else:
@@ -46,6 +45,8 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
                 "reprojected_crs": "EPSG:4326",
                 "width": dataset.width,
                 "height": dataset.height,
+                "band_count": band_count,
+                "modality": "sar" if band_count == 1 else "optical",
                 "bounds": [min_lon, min_lat, max_lon, max_lat],
                 "center": [center_lon, center_lat],
                 "geojson_bounds": {
@@ -71,18 +72,22 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
         return get_pil_metadata(file_path)
 
 def get_pil_metadata(file_path: str) -> Dict[str, Any]:
-    """Fallback for non-geospatial images (PNG/JPG) using PIL to extract dimensions."""
+    """Fallback for non-geospatial images (PNG/JPG) using PIL to extract dimensions and band count."""
     width, height = 1024, 1024
+    band_count = 3
     try:
         from PIL import Image
         with Image.open(file_path) as img:
             width, height = img.size
+            band_count = len(img.getbands())
     except Exception as img_err:
         logger.warning(f"Could not read image dimensions using PIL: {img_err}")
 
     default = get_default_bounds()
     default["width"] = width
     default["height"] = height
+    default["band_count"] = band_count
+    default["modality"] = "sar" if band_count == 1 else "optical"
     return default
 
 def get_default_bounds() -> Dict[str, Any]:
@@ -93,6 +98,8 @@ def get_default_bounds() -> Dict[str, Any]:
         "reprojected_crs": "EPSG:4326",
         "width": 1024,
         "height": 1024,
+        "band_count": 3,
+        "modality": "optical",
         "bounds": [min_lon, min_lat, max_lon, max_lat],
         "center": [(min_lon + max_lon)/2.0, (min_lat + max_lat)/2.0],
         "geojson_bounds": {

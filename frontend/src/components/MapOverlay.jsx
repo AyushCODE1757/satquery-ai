@@ -10,6 +10,7 @@ import L from "leaflet";
 import EmptyState from "./EmptyState";
 import TaskBadge from "./TaskBadge";
 import ConfidenceBar from "./ConfidenceBar";
+import ExecutionSummaryPanel from "./ExecutionSummaryPanel";
 
 const SOURCE_STYLE = {
   optical: { color: "#22d3ee", fillColor: "#22d3ee" }, // cyan
@@ -175,6 +176,9 @@ export default function MapOverlay({ result }) {
               <p className="text-sm text-slate-200 leading-relaxed">
                 {result.text}
               </p>
+              <ExecutionSummaryPanel
+                executionSummary={result?.execution_summary}
+              />
             </div>
           )}
         </>

@@ -101,17 +101,20 @@ Output ONLY the exact category string name. Do not output markdown, reasoning, o
             logger.warning(f"ChatNVIDIA classification failed: {e}")
 
     # Fallback to OpenAI if OPENAI_API_KEY is present
+        # Fallback to OpenAI if OPENAI_API_KEY is present
     if os.getenv("OPENAI_API_KEY"):
         try:
             from langchain_openai import ChatOpenAI
-            from langchain.prompts import PromptTemplate
 
-            prompt = PromptTemplate.from_template(prompt_str)
             llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-            chain = prompt | llm
-            response = chain.invoke({"query": query, "num_images": len(image_ids) if image_ids else 0})
+            response = llm.invoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg}
+            ])
             result = response.content.strip().lower()
-            return result if result in VALID_TASKS else None
+            for task in ["optical_sar_fusion", "change_vqa", "visual_grounding", "single_image_vqa"]:
+                if task in result:
+                    return task
         except Exception as e:
             logger.debug(f"OpenAI fallback classification exception: {e}")
 

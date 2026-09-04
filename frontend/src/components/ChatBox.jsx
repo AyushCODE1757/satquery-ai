@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import TaskBadge from "./TaskBadge";
+import { validateFiles } from "../lib/fileValidation";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
@@ -146,8 +147,14 @@ export default function ChatBox({ onResult, demoMode }) {
             accept=".tif,.tiff,.png,.jpg,.jpeg"
             onChange={(e) => {
               const selected = Array.from(e.target.files);
+              const { valid, message } = validateFiles(selected);
+              if (!valid) {
+                appendLog({ type: "error", message });
+                e.target.value = "";
+                return;
+              }
               setFiles(selected);
-              previewUrls.forEach((url) => URL.revokeObjectURL(url)); // avoid memory leaks on re-select
+              previewUrls.forEach((url) => URL.revokeObjectURL(url));
               setPreviewUrls(selected.map((f) => URL.createObjectURL(f)));
             }}
             className="text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-300 hover:file:bg-slate-700 file:cursor-pointer file:transition-colors"

@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-# Ensure backend directory is in sys.path regardless of execution entry point
 backend_dir = str(Path(__file__).resolve().parent)
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
@@ -21,9 +20,9 @@ from geo_utils import extract_bounds_and_crs
 from router import classify_task, get_tool_for_task
 from fallback_payloads import FALLBACK_PAYLOADS
 from tools import TOOL_REGISTRY
+from inference_cache import get_cached_or_none
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -32,10 +31,9 @@ logger = logging.getLogger("satquery.main")
 app = FastAPI(
     title="SatQuery AI - Interactive Remote Sensing Assistant API",
     description="Backend AI OS & Agent Router API for Satellite Imagery VQA, Visual Grounding, Change Analysis, and Optical-SAR Fusion.",
-    version="1.0.0"
+    version="2.0.0"
 )
 
-# CORS setup for React/Next.js frontend integration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -44,7 +42,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory image metadata store
 IMAGE_STORE = {}
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -79,11 +76,6 @@ def get_image_info(image_id: str):
 
 @app.post("/api/upload")
 async def upload_images(images: List[UploadFile] = File(...)):
-    """
-    Accepts 1 or 2 satellite image files via multipart/form-data (field: 'images').
-    Extracts CRS & bounds using rasterio and stores image metadata.
-    Returns opaque image_ids string list.
-    """
     if not images or len(images) > 2:
         raise HTTPException(status_code=400, detail="Please upload 1 or 2 satellite imagery files.")
 
@@ -91,11 +83,11 @@ async def upload_images(images: List[UploadFile] = File(...)):
     for file in images:
         opaque_id = f"img_{uuid.uuid4().hex[:8]}"
         file_path = os.path.join(UPLOAD_DIR, f"{opaque_id}_{file.filename}")
-        
+
         content = await file.read()
         with open(file_path, "wb") as f:
             f.write(content)
-            
+
         geo_meta = extract_bounds_and_crs(file_path)
         IMAGE_STORE[opaque_id] = {
             "file_path": file_path,
@@ -111,7 +103,10 @@ async def upload_images(images: List[UploadFile] = File(...)):
 async def query_agent(payload: QueryRequest):
     """
     SSE stream endpoint for natural language query execution over uploaded imagery.
-    Respects request-scoped `demo_mode` parameter for pitch-day reliability fallback.
+    V2: demo_mode now checks a real pre-computed inference cache first, and only
+    falls back to the hardcoded FALLBACK_PAYLOADS if neither a cache hit nor a
+    live tool result is available (keeps a safety net without ever preferring
+    fake output over real output).
     """
     query = payload.query
     image_ids = payload.image_ids
@@ -119,33 +114,33 @@ async def query_agent(payload: QueryRequest):
 
     async def event_generator():
         try:
-            # Step 1: Imagery validation trace
             yield f"data: {json.dumps({'type': 'trace', 'message': 'Validating imagery and CRS...'})}\n\n"
             await asyncio.sleep(0.5)
 
-            # Step 2: Task classification trace
             yield f"data: {json.dumps({'type': 'trace', 'message': 'Classifying task via agent router...'})}\n\n"
             await asyncio.sleep(0.5)
 
-            # Route query using router logic
             task_type = classify_task(query, image_ids)
             tool_name = get_tool_for_task(task_type)
 
             yield f"data: {json.dumps({'type': 'trace', 'message': f'Routed to: {task_type}'})}\n\n"
             await asyncio.sleep(0.5)
 
+            cached_payload = None
             if demo_mode:
-                # Pitch-day fallback trace & payload
-                yield f"data: {json.dumps({'type': 'trace', 'message': 'Pitch-day Fallback Mode Active — Loading verified inference artifacts...'})}\n\n"
-                await asyncio.sleep(0.5)
-                
-                yield f"data: {json.dumps({'type': 'trace', 'message': 'Running inference...'})}\n\n"
-                await asyncio.sleep(0.5)
+                yield f"data: {json.dumps({'type': 'trace', 'message': 'Checking pre-computed inference cache...'})}\n\n"
+                await asyncio.sleep(0.3)
+                cached_payload = get_cached_or_none(image_ids, task_type, IMAGE_STORE)
 
-                fallback_payload = FALLBACK_PAYLOADS.get(task_type, FALLBACK_PAYLOADS["single_image_vqa"])
-                yield f"data: {json.dumps(fallback_payload)}\n\n"
+            if cached_payload:
+                yield f"data: {json.dumps({'type': 'trace', 'message': 'Cache hit — returning verified real inference result.'})}\n\n"
+                await asyncio.sleep(0.3)
+                yield f"data: {json.dumps(cached_payload)}\n\n"
             else:
-                # Real inference trace & tool invocation
+                if demo_mode:
+                    yield f"data: {json.dumps({'type': 'trace', 'message': 'No cache match — falling through to live inference.'})}\n\n"
+                    await asyncio.sleep(0.3)
+
                 yield f"data: {json.dumps({'type': 'trace', 'message': f'Executing specialist tool [{tool_name}]...'})}\n\n"
                 await asyncio.sleep(0.5)
 
