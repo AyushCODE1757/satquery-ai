@@ -1,0 +1,10 @@
+rasterio
+numpy
+Pillow
+opencv-python
+datasets
+torch
+transformers
+peft
+bitsandbytes
+accelerate

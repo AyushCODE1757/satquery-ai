@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+
 lib64/
 parts/
 sdist/
@@ -216,3 +216,94 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==========================================
+# 1. Environments & Dependencies
+# ==========================================
+# Virtual environments (covers .venv, venv across root, backend, and ml_pipelines)
+.venv/
+venv/
+env/
+ENV/
+*/venv/
+*/.venv/
+
+# Node dependencies (frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# 2. Environment Variables & Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+frontend/.env.local
+frontend/.env.*.local
+
+# ==========================================
+# 3. Python Runtime & Caching
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ==========================================
+# 4. Machine Learning & Training Artifacts
+# ==========================================
+# HuggingFace / PyTorch training checkpoints (prevents gigabytes of optimizer states)
+checkpoint-*/
+*/checkpoint-*/
+*/**/checkpoint-*/
+
+# Wandb / TensorBoard logs
+wandb/
+runs/
+
+# Large model weights (GitHub 100MB limit guardrail)
+# Keeps adapter_config.json/tokenizers, ignores raw heavy weights if over limit
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# If you want to exclude your sample test datasets / heavy SAR TIFFs:
+sample_data/
+*/sample_data/
+*.tif
+*.tiff
+*.aux.xml
+
+# ==========================================
+# 5. Backend Runtime & Storage
+# ==========================================
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/inference_cache/
+*.log
+
+# ==========================================
+# 6. Frontend Build Output (Vite)
+# ==========================================
+frontend/dist/
+frontend/dist-ssr/
+
+# ==========================================
+# 7. OS & IDE Metadata
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
