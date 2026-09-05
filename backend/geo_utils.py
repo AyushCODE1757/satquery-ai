@@ -19,7 +19,17 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
 
     try:
         with rasterio.open(file_path) as dataset:
-            crs_str = dataset.crs.to_string() if dataset.crs else "EPSG:4326"
+            # crs_str = dataset.crs.to_string() if dataset.crs else "EPSG:4326"
+            if dataset.crs is None:
+                logger.info(f"{file_path} has no CRS (missing sidecar or truly non-georeferenced). Using safe default bounds.")
+                fallback = get_default_bounds()
+                fallback["width"] = dataset.width
+                fallback["height"] = dataset.height
+                fallback["band_count"] = dataset.count
+                fallback["modality"] = "sar" if dataset.count == 1 else "optical"
+                return fallback
+            crs_str = dataset.crs.to_string()
+            
             bounds = dataset.bounds  # (left, bottom, right, top)
             band_count = dataset.count
 
@@ -47,6 +57,7 @@ def extract_bounds_and_crs(file_path: str) -> Dict[str, Any]:
                 "height": dataset.height,
                 "band_count": band_count,
                 "modality": "sar" if band_count == 1 else "optical",
+                "georeferenced": True,          # ADD THIS LINE
                 "bounds": [min_lon, min_lat, max_lon, max_lat],
                 "center": [center_lon, center_lat],
                 "geojson_bounds": {
@@ -84,6 +95,7 @@ def get_pil_metadata(file_path: str) -> Dict[str, Any]:
         logger.warning(f"Could not read image dimensions using PIL: {img_err}")
 
     default = get_default_bounds()
+    default["georeferenced"] = False    # ADD THIS LINE
     default["width"] = width
     default["height"] = height
     default["band_count"] = band_count
@@ -100,6 +112,7 @@ def get_default_bounds() -> Dict[str, Any]:
         "height": 1024,
         "band_count": 3,
         "modality": "optical",
+        "georeferenced": False,             # ADD THIS LINE
         "bounds": [min_lon, min_lat, max_lon, max_lat],
         "center": [(min_lon + max_lon)/2.0, (min_lat + max_lat)/2.0],
         "geojson_bounds": {

@@ -8,6 +8,7 @@ the Kaggle fine-tune is still running, so integration testing (frontend,
 FS-2 routing, ML-2/ML-3 wiring) isn't blocked waiting 1.5+ hours.
 """
 
+from email.mime import image
 import os
 import re
 import torch
@@ -22,6 +23,24 @@ LORA_PATH = os.path.join(os.path.dirname(__file__), "lora_adapter")
 
 _processor = None
 _model = None
+
+
+def extract_object_phrase(query: str) -> str:
+    """Strips instruction verbs so PaliGemma's 'detect X' gets a plain
+    object noun, not a full sentence. Fixes the observed bug where
+    'Highlight the road' was passed to the model verbatim."""
+    prefixes = [
+        r"^highlight the\s+", r"^highlight\s+", r"^locate the\s+", r"^locate\s+",
+        r"^find the\s+", r"^find\s+", r"^show me the\s+", r"^show\s+",
+        r"^where is the\s+", r"^where is\s+", r"^detect the\s+", r"^detect\s+",
+        r"^identify the\s+", r"^identify\s+",
+    ]
+    q_lower = query.strip().lower()
+    for pat in prefixes:
+        m = re.match(pat, q_lower)
+        if m:
+            return query.strip()[m.end():].strip().rstrip("?.!")
+    return query.strip()
 
 def _load_model_once():
     global _processor, _model
@@ -93,8 +112,8 @@ def _generate_with_confidence(prompt: str, image: Image.Image, max_new_tokens: i
 def generate_caption(image_path: str, query: str) -> str:
     """Hand this function directly to ML-3 as their vqa_fn parameter."""
     image = Image.open(image_path).convert("RGB")
-    text, _confidence = _generate_with_confidence(f"answer en {query}", image)
-    return text
+    text, confidence = _generate_with_confidence(f"answer en {query}", image)
+    return {"text": text, "confidence": confidence}
 
 
 def _generate(prompt: str, image: Image.Image, max_new_tokens: int = 50) -> str:
@@ -144,7 +163,8 @@ def run_grounding_tool(query: str, image_ids: list, image_store: dict) -> dict:
         parsed = {"x_min": 200, "y_min": 200, "x_max": 600, "y_max": 600, "label": f"[MOCK] {query}"}
         confidence = 0.0
     else:
-        raw_output, confidence = _generate_with_confidence(f"detect {query}\n", image)
+        object_phrase = extract_object_phrase(query)
+        raw_output, confidence = _generate_with_confidence(f"detect {object_phrase}\n", image)
         parsed = parse_location_tokens(raw_output)
 
     geo_meta = image_store[image_ids[0]].get("geo_meta", {})
@@ -176,6 +196,10 @@ def run_grounding_tool(query: str, image_ids: list, image_store: dict) -> dict:
     p2 = to_lonlat(parsed["x_max"], parsed["y_min"])
     p3 = to_lonlat(parsed["x_max"], parsed["y_max"])
     p4 = to_lonlat(parsed["x_min"], parsed["y_max"])
+    image_space_bbox = [
+        parsed["x_min"] / 1024, parsed["y_min"] / 1024,
+        parsed["x_max"] / 1024, parsed["y_max"] / 1024,
+    ]
 
     return {
         "type": "final",
@@ -185,7 +209,7 @@ def run_grounding_tool(query: str, image_ids: list, image_store: dict) -> dict:
             "features": [{
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": [[p1, p2, p3, p4, p1]]},
-                "properties": {"label": parsed["label"] or query, "confidence": 0.0},
+                "properties": {"label": parsed["label"] or object_phrase, "confidence": confidence, "image_space_bbox": image_space_bbox},
             }],
         },
         "confidence": confidence,

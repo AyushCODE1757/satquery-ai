@@ -11,6 +11,20 @@ from fusion_tool import (
     normalize_raw_sar_to_uint8,
 )
 
+DEFAULT_BOUNDS = [72.50, 23.01, 72.55, 23.05]
+
+def get_wgs84_bounds_or_default(tif_path: str) -> tuple:
+    """Returns (bounds, was_real). Never raises — falls back gracefully
+    so one file's missing CRS/sidecar can't crash the whole pipeline."""
+    try:
+        with rasterio.open(tif_path) as src:
+            if src.crs is None:
+                return DEFAULT_BOUNDS, False
+            bounds = src.bounds
+            wgs84_bounds = transform_bounds(src.crs, "EPSG:4326", *bounds)
+            return list(wgs84_bounds), True
+    except Exception:
+        return DEFAULT_BOUNDS, False
 
 def get_wgs84_bounds(tif_path: str) -> list:
     """
@@ -97,19 +111,33 @@ def run_fusion_tool(
     composite_path = fusion_result["image_path"]
 
     # --- Real bounds from optical file's CRS ---
-    bounds = get_wgs84_bounds(optical_path)
+    # bounds = get_wgs84_bounds(optical_path)
+    bounds, is_real_bounds = get_wgs84_bounds_or_default(optical_path)
 
     # --- Text: real VQA output if wired in, else honest placeholder ---
+    # if vqa_fn is not None:
+    #     text = vqa_fn(composite_path, query)
+    #     confidence = static_confidence  # swap for real generation score once available
+    # else:
+    #     text = (
+    #         "[PENDING] Optical-SAR fusion composite generated successfully, "
+    #         "but VQA text description is not yet wired in — awaiting "
+    #         "ML-1's inference function."
+    #     )
+    #     confidence = 0.0  # explicitly zero — do not fabricate a number for un-run inference
+
     if vqa_fn is not None:
-        text = vqa_fn(composite_path, query)
-        confidence = static_confidence  # swap for real generation score once available
+        inference_result = vqa_fn(composite_path, query)
+        if isinstance(inference_result, dict):
+            text = str(inference_result.get("text", ""))
+            confidence = float(inference_result.get("confidence", 0.0))
+        else:
+            text = str(inference_result)
+            confidence = 0.0
     else:
-        text = (
-            "[PENDING] Optical-SAR fusion composite generated successfully, "
-            "but VQA text description is not yet wired in — awaiting "
-            "ML-1's inference function."
-        )
-        confidence = 0.0  # explicitly zero — do not fabricate a number for un-run inference
+        text = "[PENDING] Optical-SAR fusion composite generated successfully, but VQA inference is not wired in."
+        confidence = 0.0
+
 
     geojson = bounds_to_geojson(
         bounds,
@@ -121,6 +149,7 @@ def run_fusion_tool(
         "text": text,
         "geojson": geojson,
         "confidence": confidence,
+        "georeferenced": is_real_bounds,  # Added here
         "execution_summary": {
             "task": "optical_sar_fusion",
             "models_used": ["fusion_tool"] + (["vqa_tool"] if vqa_fn else []),

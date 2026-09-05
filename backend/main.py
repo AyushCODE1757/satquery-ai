@@ -125,6 +125,12 @@ async def query_agent(payload: QueryRequest):
 
             yield f"data: {json.dumps({'type': 'trace', 'message': f'Routed to: {task_type}'})}\n\n"
             await asyncio.sleep(0.5)
+            
+            # Calculate georeferenced status once to use in payloads
+            is_georeferenced = any(
+                IMAGE_STORE.get(img_id, {}).get("geo_meta", {}).get("georeferenced", False)
+                for img_id in image_ids
+            )
 
             cached_payload = None
             if demo_mode:
@@ -135,6 +141,8 @@ async def query_agent(payload: QueryRequest):
             if cached_payload:
                 yield f"data: {json.dumps({'type': 'trace', 'message': 'Cache hit — returning verified real inference result.'})}\n\n"
                 await asyncio.sleep(0.3)
+                
+                cached_payload["image_georeferenced"] = is_georeferenced
                 yield f"data: {json.dumps(cached_payload)}\n\n"
             else:
                 if demo_mode:
@@ -150,9 +158,13 @@ async def query_agent(payload: QueryRequest):
                 tool_func = TOOL_REGISTRY.get(tool_name)
                 if tool_func:
                     result_payload = tool_func(query, image_ids, IMAGE_STORE)
+                    
+                    result_payload["image_georeferenced"] = is_georeferenced
                     yield f"data: {json.dumps(result_payload)}\n\n"
                 else:
                     fallback_payload = FALLBACK_PAYLOADS.get(task_type, FALLBACK_PAYLOADS["single_image_vqa"])
+                    
+                    fallback_payload["image_georeferenced"] = is_georeferenced
                     yield f"data: {json.dumps(fallback_payload)}\n\n"
 
         except Exception as e:
@@ -172,3 +184,77 @@ async def query_agent(payload: QueryRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+# @app.post("/api/query")
+# async def query_agent(payload: QueryRequest):
+#     """
+#     SSE stream endpoint for natural language query execution over uploaded imagery.
+#     V2: demo_mode now checks a real pre-computed inference cache first, and only
+#     falls back to the hardcoded FALLBACK_PAYLOADS if neither a cache hit nor a
+#     live tool result is available (keeps a safety net without ever preferring
+#     fake output over real output).
+#     """
+#     query = payload.query
+#     image_ids = payload.image_ids
+#     demo_mode = payload.demo_mode
+
+#     async def event_generator():
+#         try:
+#             yield f"data: {json.dumps({'type': 'trace', 'message': 'Validating imagery and CRS...'})}\n\n"
+#             await asyncio.sleep(0.5)
+
+#             yield f"data: {json.dumps({'type': 'trace', 'message': 'Classifying task via agent router...'})}\n\n"
+#             await asyncio.sleep(0.5)
+
+#             task_type = classify_task(query, image_ids)
+#             tool_name = get_tool_for_task(task_type)
+
+#             yield f"data: {json.dumps({'type': 'trace', 'message': f'Routed to: {task_type}'})}\n\n"
+#             await asyncio.sleep(0.5)
+
+#             cached_payload = None
+#             if demo_mode:
+#                 yield f"data: {json.dumps({'type': 'trace', 'message': 'Checking pre-computed inference cache...'})}\n\n"
+#                 await asyncio.sleep(0.3)
+#                 cached_payload = get_cached_or_none(image_ids, task_type, IMAGE_STORE)
+
+#             if cached_payload:
+#                 yield f"data: {json.dumps({'type': 'trace', 'message': 'Cache hit — returning verified real inference result.'})}\n\n"
+#                 await asyncio.sleep(0.3)
+#                 yield f"data: {json.dumps(cached_payload)}\n\n"
+#             else:
+#                 if demo_mode:
+#                     yield f"data: {json.dumps({'type': 'trace', 'message': 'No cache match — falling through to live inference.'})}\n\n"
+#                     await asyncio.sleep(0.3)
+
+#                 yield f"data: {json.dumps({'type': 'trace', 'message': f'Executing specialist tool [{tool_name}]...'})}\n\n"
+#                 await asyncio.sleep(0.5)
+
+#                 yield f"data: {json.dumps({'type': 'trace', 'message': 'Running inference...'})}\n\n"
+#                 await asyncio.sleep(0.5)
+
+#                 tool_func = TOOL_REGISTRY.get(tool_name)
+#                 if tool_func:
+#                     result_payload = tool_func(query, image_ids, IMAGE_STORE)
+#                     yield f"data: {json.dumps(result_payload)}\n\n"
+#                 else:
+#                     fallback_payload = FALLBACK_PAYLOADS.get(task_type, FALLBACK_PAYLOADS["single_image_vqa"])
+#                     yield f"data: {json.dumps(fallback_payload)}\n\n"
+
+#         except Exception as e:
+#             logger.error(f"Error during query stream: {e}", exc_info=True)
+#             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+#     return StreamingResponse(
+#         event_generator(),
+#         media_type="text/event-stream",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

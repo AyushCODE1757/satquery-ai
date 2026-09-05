@@ -155,9 +155,8 @@ def pixel_to_lonlat(px, py, img_width, img_height, wgs84_bounds):
     lat = max_lat - (py / img_height) * (max_lat - min_lat)
     return [lon, lat]
 
-
 def run_change_tool(query: str, image1_path: str, image2_path: str,
-                     threshold_value: int = 30, min_area: int = 5) -> dict:
+                    threshold_value: int = 30, min_area: int = 5) -> dict:
     img1 = load_image_as_bgr(image1_path)
     img2 = load_image_as_bgr(image2_path)
     height, width = img1.shape[:2]
@@ -169,6 +168,12 @@ def run_change_tool(query: str, image1_path: str, image2_path: str,
     for feat in pixel_geojson["features"]:
         pixel_points = feat["geometry"]["coordinates"][0]
         lonlat_points = [pixel_to_lonlat(px, py, width, height, wgs84_bounds) for px, py in pixel_points]
+        
+        # Calculate image-space fractional bounding box
+        xs = [p[0] for p in pixel_points]
+        ys = [p[1] for p in pixel_points]
+        image_space_bbox = [min(xs)/width, min(ys)/height, max(xs)/width, max(ys)/height]
+
         features.append({
             "type": "Feature",
             "geometry": {"type": "Polygon", "coordinates": [lonlat_points]},
@@ -176,6 +181,7 @@ def run_change_tool(query: str, image1_path: str, image2_path: str,
                 "label": "Detected change region",
                 "area_px": feat["properties"]["area"],
                 "confidence": 0.0,
+                "image_space_bbox": image_space_bbox,
             },
         })
 
@@ -199,3 +205,47 @@ def run_change_tool(query: str, image1_path: str, image2_path: str,
             "params": {"query": query, "threshold_value": threshold_value, "min_area": min_area},
         },
     }
+
+# def run_change_tool(query: str, image1_path: str, image2_path: str,
+#                      threshold_value: int = 30, min_area: int = 5) -> dict:
+#     img1 = load_image_as_bgr(image1_path)
+#     img2 = load_image_as_bgr(image2_path)
+#     height, width = img1.shape[:2]
+
+#     wgs84_bounds = get_wgs84_bounds_or_default(image1_path)
+#     pixel_geojson = change_tool(img1, img2, threshold_value, min_area)
+
+#     features = []
+#     for feat in pixel_geojson["features"]:
+#         pixel_points = feat["geometry"]["coordinates"][0]
+#         lonlat_points = [pixel_to_lonlat(px, py, width, height, wgs84_bounds) for px, py in pixel_points]
+#         features.append({
+#             "type": "Feature",
+#             "geometry": {"type": "Polygon", "coordinates": [lonlat_points]},
+#             "properties": {
+#                 "label": "Detected change region",
+#                 "area_px": feat["properties"]["area"],
+#                 "confidence": 0.0,
+#             },
+#         })
+
+#     num_changes = len(features)
+#     text = (
+#         "No significant structural change detected between the two dates above the current sensitivity threshold."
+#         if num_changes == 0 else
+#         f"Detected {num_changes} region(s) of structural change between the two dates. "
+#         f"[PENDING] Semantic 'what changed' description requires ML-2's CDVQA-based upgrade — "
+#         f"this version identifies WHERE via pixel-difference only."
+#     )
+
+#     return {
+#         "type": "final",
+#         "text": text,
+#         "geojson": {"type": "FeatureCollection", "features": features},
+#         "confidence": 0.0 if num_changes else 0.5,
+#         "execution_summary": {
+#             "task": "change_vqa",
+#             "models_used": ["change_tool_cv2_mvp"],
+#             "params": {"query": query, "threshold_value": threshold_value, "min_area": min_area},
+#         },
+#     }
