@@ -357,12 +357,11 @@ def run_fusion_tool(query, image_ids, image_store=None):
 
     result = _ml3_fusion(
         query, optical_path, sar_path,
-        sar_vv_band=1, optical_green_band=1, optical_blue_band=2,  # real Bhoonidhi demo convention, per ML-3's docstring
-        normalize_fn=normalize_raw_sar_to_uint8,
+        sar_vv_band=None, optical_green_band=None, optical_blue_band=None,
+        normalize_fn=None,
         vqa_fn=generate_caption,
         static_confidence=0.80,
     )
-    result["type"] = "final"  # ML-3's file doesn't set this key yet — patched here so it isn't silently dropped
     return result
 
 
