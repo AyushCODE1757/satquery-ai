@@ -142,8 +142,9 @@ def run_grounding_tool(query: str, image_ids: list, image_store: dict) -> dict:
 
     if MOCK_MODE:
         parsed = {"x_min": 200, "y_min": 200, "x_max": 600, "y_max": 600, "label": f"[MOCK] {query}"}
+        confidence = 0.0
     else:
-        raw_output , confidence = _generate_with_confidence(f"detect {query}\n", image)
+        raw_output, confidence = _generate_with_confidence(f"detect {query}\n", image)
         parsed = parse_location_tokens(raw_output)
 
     geo_meta = image_store[image_ids[0]].get("geo_meta", {})

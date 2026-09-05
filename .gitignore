@@ -278,11 +278,11 @@ runs/
 *.onnx
 
 # If you want to exclude your sample test datasets / heavy SAR TIFFs:
-sample_data/
-*/sample_data/
+# Large generated/output geospatial files — NOT the committed sample fixtures below
 *.tif
 *.tiff
-*.aux.xml
+!ml_pipelines/**/sample_data/**/*.tif
+!ml_pipelines/**/sample_data/**/*.tiff
 
 # ==========================================
 # 5. Backend Runtime & Storage
